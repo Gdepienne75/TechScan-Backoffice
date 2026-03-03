@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, Database, ChevronRight, User, LogOut, Lock, Eye, EyeOff, Save, Layers, Hash, Calendar, ArrowRight, MapPin, Cpu } from 'lucide-react';
+import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, Database, ChevronRight, User, LogOut, Lock, Eye, EyeOff, Save, Layers, Hash, Calendar, ArrowRight, MapPin, Cpu, Globe, Image as ImageIcon } from 'lucide-react';
 
 // --- CONFIGURATION SUPABASE ---
 // ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
-import { createClient } from '@supabase/supabase-js';
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
-
+// import { createClient } from '@supabase/supabase-js';
+// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+// const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+const supabase = null; // <-- LIGNE À SUPPRIMER SUR VOTRE PROJET
 
 // --- CONFIGURATION API IA (Gemini) ---
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+// const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+const GEMINI_API_KEY = ''; // <-- LIGNE À SUPPRIMER SUR VOTRE PROJET
+
+// --- CONFIGURATION GOOGLE IMAGES ---
+// ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
+// const GOOGLE_SEARCH_API_KEY = import.meta.env.VITE_GOOGLE_SEARCH_API_KEY || '';
+// const GOOGLE_SEARCH_CX = import.meta.env.VITE_GOOGLE_SEARCH_CX || '';
+const GOOGLE_SEARCH_API_KEY = ''; // <-- LIGNE À SUPPRIMER
+const GOOGLE_SEARCH_CX = ''; // <-- LIGNE À SUPPRIMER
+
 
 // Composant pour écraser les marges par défaut de Vite/StackBlitz
 const GlobalCssReset = () => (
@@ -36,6 +45,11 @@ export default function BackOfficeApp() {
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [stats, setStats] = useState({ totalProcessed: 0 });
+  
+  // État pour la recherche d'images web
+  const [webImages, setWebImages] = useState([]);
+  const [isSearchingImages, setIsSearchingImages] = useState(false);
+  const [selectedWebImage, setSelectedWebImage] = useState(null);
   
   // État pour le modèle IA sélectionné (2.5-flash par défaut, modèle stable actuel)
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
@@ -118,6 +132,8 @@ export default function BackOfficeApp() {
 
   const handleSelectArticle = (article) => {
     setSelectedArticle(article);
+    setWebImages([]); // Reset images web
+    setSelectedWebImage(null); // Reset image web selectionnée
     setFormData({
       designation: '',
       marque: '',
@@ -238,6 +254,49 @@ export default function BackOfficeApp() {
     }
   };
 
+  // 🌐 RECHERCHE D'IMAGES GOOGLE
+  const searchGoogleImages = async () => {
+    if (!formData.designation) {
+      showToast("Veuillez remplir la désignation avant de chercher des images.");
+      return;
+    }
+    
+    if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_CX) {
+      showToast("Clés API manquantes : configurez VITE_GOOGLE_SEARCH_API_KEY et VITE_GOOGLE_SEARCH_CX.");
+      return;
+    }
+
+    setIsSearchingImages(true);
+    setWebImages([]);
+    setSelectedWebImage(null);
+
+    try {
+      // On combine la marque et la désignation pour avoir le meilleur résultat possible
+      const query = `${formData.marque !== 'Inconnue' ? formData.marque : ''} ${formData.designation}`.trim();
+      
+      const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&cx=${GOOGLE_SEARCH_CX}&searchType=image&key=${GOOGLE_SEARCH_API_KEY}&num=10`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Erreur lors de la recherche.");
+      }
+
+      if (data.items && data.items.length > 0) {
+        setWebImages(data.items.map(item => item.link));
+        showToast("10 images trouvées !");
+      } else {
+        showToast("Aucune image trouvée pour cette recherche.");
+      }
+    } catch (error) {
+      console.error("Erreur Google Images:", error);
+      showToast(error.message || "Erreur de connexion à Google Images.");
+    } finally {
+      setIsSearchingImages(false);
+    }
+  };
+
   // --- 3. VALIDATION ET TRANSFERT ---
   const handleSaveToCatalog = async () => {
     if (!supabase || !selectedArticle) return;
@@ -256,7 +315,8 @@ export default function BackOfficeApp() {
         groupe: formData.groupe,
         famille: formData.famille,
         type: formData.type,
-        photo_url: selectedArticle.photo_url,
+        // NOUVEAU : Si une image web a été cliquée, on l'utilise. Sinon on garde la photo scannée.
+        photo_url: selectedWebImage || selectedArticle.photo_url,
         statut: 'Actif',
         site_rattachement: selectedArticle.magasin
       };
@@ -479,16 +539,28 @@ export default function BackOfficeApp() {
                    
                    {/* COLONNE PHOTO & IA */}
                    <div className="w-full xl:w-5/12 flex flex-col gap-4 h-full">
-                      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[55%]">
+                      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[55%] relative">
                          <div className="flex justify-between items-center mb-4 shrink-0">
-                           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Image Source</h3>
+                           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                              {selectedWebImage ? <><Globe size={16} className="text-emerald-500"/> Image retenue</> : <><ImageIcon size={16}/> Image scannée</>}
+                           </h3>
                            <span className="text-slate-700 font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200 flex items-center gap-2">
                              <Hash size={14} className="text-slate-400"/> {selectedArticle.code_barre}
                            </span>
                          </div>
-                         <div className="bg-slate-900 rounded-xl overflow-hidden flex-1 flex items-center justify-center relative shadow-inner w-full min-h-0">
-                            <img src={selectedArticle.photo_url} alt="Pièce" className="max-w-full max-h-full object-contain" />
+
+                         {/* Affichage intelligent : Soit l'image Web cliquée, soit la photo scannée */}
+                         <div className={`bg-slate-900 rounded-xl overflow-hidden flex-1 flex items-center justify-center relative shadow-inner w-full min-h-0 ${selectedWebImage ? 'ring-4 ring-emerald-500/50' : ''}`}>
+                            <img src={selectedWebImage || selectedArticle.photo_url} alt="Pièce" className="max-w-full max-h-full object-contain" />
                          </div>
+                         
+                         {/* Si une image web est sélectionnée, on garde un aperçu de la photo scannée en bas */}
+                         {selectedWebImage && (
+                            <div className="absolute bottom-8 left-8 bg-white p-1 rounded-lg shadow-xl flex items-center gap-2 border border-slate-200 animate-in fade-in zoom-in">
+                                <img src={selectedArticle.photo_url} className="w-12 h-12 object-cover rounded bg-slate-100" title="Photo originale scannée" />
+                                <div className="text-[10px] font-bold text-slate-500 leading-tight pr-2">Photo<br/>Originale</div>
+                            </div>
+                         )}
                       </div>
 
                       <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-2xl border border-indigo-100 shadow-inner flex flex-col items-center justify-center h-[45%]">
@@ -532,7 +604,7 @@ export default function BackOfficeApp() {
                    {/* COLONNE FORMULAIRE DE VALIDATION */}
                    <div className="w-full xl:w-7/12 flex flex-col h-full">
                       <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-lg border border-slate-200 flex-1 flex flex-col h-full overflow-y-auto">
-                         <div className="flex items-center gap-3 mb-8 border-b border-slate-100 pb-5 shrink-0">
+                         <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-5 shrink-0">
                             <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center">
                                <Database size={20} />
                             </div>
@@ -580,11 +652,11 @@ export default function BackOfficeApp() {
                               </div>
                             </div>
 
-                            <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent my-4"></div>
+                            <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent my-2"></div>
 
                             {/* SECTION CLASSIFICATION */}
                             <div>
-                              <h4 className="text-sm font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-widest"><Layers size={16}/> Classification</h4>
+                              <h4 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2 uppercase tracking-widest"><Layers size={16}/> Classification</h4>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                  <div>
                                     <label className="text-slate-600 text-xs font-bold mb-1.5 block">Groupe</label>
@@ -600,6 +672,40 @@ export default function BackOfficeApp() {
                                  </div>
                               </div>
                             </div>
+                            
+                            {/* NOUVEAU : SECTION RECHERCHE IMAGES WEB */}
+                            <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mt-4">
+                              <div className="flex items-center justify-between mb-3">
+                                  <div>
+                                    <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-widest"><Globe size={16} className="text-blue-500"/> Photo Web</h4>
+                                    <p className="text-xs text-slate-500 mt-0.5">Remplacer la photo du technicien par une image officielle.</p>
+                                  </div>
+                                  <button
+                                      onClick={searchGoogleImages}
+                                      disabled={isSearchingImages || !formData.designation}
+                                      className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                      {isSearchingImages ? <RefreshCw size={14} className="animate-spin text-blue-500" /> : <Search size={14} className="text-blue-500" />}
+                                      Chercher sur Google
+                                  </button>
+                              </div>
+
+                              {webImages.length > 0 && (
+                                  <div className="grid grid-cols-5 gap-3 mt-4 animate-in slide-in-from-top-2">
+                                      {webImages.map((imgUrl, idx) => (
+                                          <div 
+                                              key={idx} 
+                                              onClick={() => setSelectedWebImage(imgUrl)}
+                                              className={`aspect-square rounded-xl bg-white overflow-hidden border-2 cursor-pointer transition-all hover:opacity-90 ${selectedWebImage === imgUrl ? 'border-emerald-500 shadow-md ring-2 ring-emerald-500/30 scale-105' : 'border-transparent shadow-sm'}`}
+                                              title="Cliquer pour utiliser cette image"
+                                          >
+                                              <img src={imgUrl} alt="Web suggestion" className="w-full h-full object-cover" />
+                                          </div>
+                                      ))}
+                                  </div>
+                              )}
+                            </div>
+
                          </div>
 
                          {/* ACTIONS FINALES */}
