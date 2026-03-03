@@ -3,23 +3,15 @@ import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, D
 
 // --- CONFIGURATION SUPABASE ---
 // ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
-// import { createClient } from '@supabase/supabase-js';
-// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-// const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-// const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
-const supabase = null; // <-- LIGNE À SUPPRIMER SUR VOTRE PROJET
+import { createClient } from '@supabase/supabase-js';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
 
 // --- CONFIGURATION API IA (Gemini) ---
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
-// const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-const GEMINI_API_KEY = ''; // <-- LIGNE À SUPPRIMER SUR VOTRE PROJET
-
-// --- CONFIGURATION GOOGLE IMAGES ---
-// ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
-// const GOOGLE_SEARCH_API_KEY = import.meta.env.VITE_GOOGLE_SEARCH_API_KEY || '';
-// const GOOGLE_SEARCH_CX = import.meta.env.VITE_GOOGLE_SEARCH_CX || '';
-const GOOGLE_SEARCH_API_KEY = ''; // <-- LIGNE À SUPPRIMER
-const GOOGLE_SEARCH_CX = ''; // <-- LIGNE À SUPPRIMER
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 
 
 // Composant pour écraser les marges par défaut de Vite/StackBlitz
@@ -51,7 +43,7 @@ export default function BackOfficeApp() {
   const [isSearchingImages, setIsSearchingImages] = useState(false);
   const [selectedWebImage, setSelectedWebImage] = useState(null);
   
-  // État pour le modèle IA sélectionné (2.5-flash par défaut, modèle stable actuel)
+  // État pour le modèle IA sélectionné
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
 
   // État du formulaire d'édition
@@ -144,33 +136,24 @@ export default function BackOfficeApp() {
     });
   };
 
-  // 🤖 Moteur IA (Connexion à la vraie API Google Gemini avec choix du modèle)
+  // 🤖 Moteur IA (Gemini)
   const runAIAnalysis = async () => {
     if (!selectedArticle) return;
     setIsProcessingAI(true);
     
     try {
-      if (!GEMINI_API_KEY) {
-        throw new Error("Clé API manquante. Ajoutez VITE_GEMINI_API_KEY sur Vercel.");
-      }
+      if (!GEMINI_API_KEY) throw new Error("Clé API manquante. Ajoutez VITE_GEMINI_API_KEY sur Vercel.");
 
-      console.log(`Démarrage de l'analyse IA avec le modèle : ${selectedModel}...`);
-
-      // 1. On récupère l'image depuis Supabase
       const imageResponse = await fetch(selectedArticle.photo_url);
-      if (!imageResponse.ok) {
-          throw new Error("Impossible de télécharger l'image depuis le serveur.");
-      }
+      if (!imageResponse.ok) throw new Error("Impossible de télécharger l'image.");
       const imageBlob = await imageResponse.blob();
       
-      // Conversion en Base64
       const base64Image = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result.split(',')[1]);
           reader.readAsDataURL(imageBlob);
       });
 
-      // 2. Le "Prompt" (Nos consignes très strictes pour l'IA)
       const promptText = `Tu es un expert magasinier technique (bricolage, électricité, plomberie, quincaillerie, mécanique, etc.).
       Analyse l'image fournie et le code-barre scanné suivant : ${selectedArticle.code_barre}.
       Identifie cet article et déduis un maximum d'informations visibles sur la boîte, l'étiquette ou l'objet lui-même.
@@ -185,57 +168,28 @@ export default function BackOfficeApp() {
         "type": "Type précis (ex: Disjoncteur, Perceuse, Cheville)"
       }`;
 
-      // 3. Appel à l'API Google Gemini dynamique selon le modèle choisi
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`;
       
-      const requestBody = {
-          contents: [{
-              parts: [
-                  { text: promptText },
-                  { 
-                      inlineData: { 
-                          mimeType: imageBlob.type || "image/jpeg", 
-                          data: base64Image 
-                      } 
-                  }
-              ]
-          }],
-          generationConfig: { 
-              responseMimeType: "application/json" 
-          }
-      };
-
       const response = await fetch(apiUrl, {
           method: 'POST',
-          headers: { 
-              'Content-Type': 'application/json',
-              'x-goog-api-key': GEMINI_API_KEY
-          },
-          body: JSON.stringify(requestBody)
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+          body: JSON.stringify({
+              contents: [{ parts: [{ text: promptText }, { inlineData: { mimeType: imageBlob.type || "image/jpeg", data: base64Image } }] }],
+              generationConfig: { responseMimeType: "application/json" }
+          })
       });
 
-      // 4. Gestion des erreurs de l'API Google
       if (!response.ok) {
           const errorData = await response.json();
-          console.error("Erreur API Gemini:", errorData);
           throw new Error(`Erreur API: ${errorData?.error?.message || response.statusText}`);
       }
 
-      // 5. Traitement de la réponse
       const result = await response.json();
+      if (!result.candidates || result.candidates.length === 0) throw new Error("L'IA n'a renvoyé aucun résultat.");
 
-      if (!result.candidates || result.candidates.length === 0) {
-           throw new Error("L'IA n'a renvoyé aucun résultat.");
-      }
-
-      const aiText = result.candidates[0].content.parts[0].text;
-      
-      // Nettoyage au cas où l'IA renvoie les balises Markdown malgré les consignes
-      const cleanJsonText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
-      
+      const cleanJsonText = result.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
       const aiData = JSON.parse(cleanJsonText);
 
-      // 6. Remplissage automatique du formulaire
       setFormData({
         designation: aiData.designation || '',
         marque: aiData.marque || '',
@@ -247,22 +201,17 @@ export default function BackOfficeApp() {
 
       showToast(`Analyse réussie avec ${selectedModel} !`);
     } catch(e) {
-      console.error("Détail du crash IA:", e);
+      console.error("Détail crash IA:", e);
       showToast(e.message || "Erreur lors de l'analyse IA.");
     } finally {
       setIsProcessingAI(false);
     }
   };
 
-  // 🌐 RECHERCHE D'IMAGES GOOGLE
-  const searchGoogleImages = async () => {
+  // 🌐 RECHERCHE D'IMAGES WEB (Scraping Bing via Proxy CORS - Basé sur ton app.py)
+  const searchWebImages = async () => {
     if (!formData.designation) {
       showToast("Veuillez remplir la désignation avant de chercher des images.");
-      return;
-    }
-    
-    if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_CX) {
-      showToast("Clés API manquantes : configurez VITE_GOOGLE_SEARCH_API_KEY et VITE_GOOGLE_SEARCH_CX.");
       return;
     }
 
@@ -271,27 +220,59 @@ export default function BackOfficeApp() {
     setSelectedWebImage(null);
 
     try {
-      // On combine la marque et la désignation pour avoir le meilleur résultat possible
+      // 1. Formation de la requête (Marque + Désignation)
       const query = `${formData.marque !== 'Inconnue' ? formData.marque : ''} ${formData.designation}`.trim();
       
-      const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&cx=${GOOGLE_SEARCH_CX}&searchType=image&key=${GOOGLE_SEARCH_API_KEY}&num=10`;
+      // 2. URL de Bing Images (comme dans ton code Python)
+      const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&first=1&count=15&qft=+filterui:photo-photo`;
       
-      const response = await fetch(url);
+      // 3. Utilisation d'un Proxy CORS public gratuit (AllOrigins) pour contourner le blocage du navigateur
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+      
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Erreur avec le proxy de recherche.");
+      
       const data = await response.json();
+      const html = data.contents; // On récupère le code HTML de Bing
 
-      if (!response.ok) {
-        throw new Error(data.error?.message || "Erreur lors de la recherche.");
+      if (!html) throw new Error("Impossible de lire la page de résultats.");
+
+      // 4. Expression Régulière (Regex) traduite de ton Python pour extraire les URLs "murl"
+      const regexPatterns = [
+        /murl&quot;:&quot;(https?:\/\/[^&"]+?)&quot;/gi,
+        /"murl":"(https?:\/\/[^"]+?)"/gi
+      ];
+
+      const foundUrls = new Set(); // Set évite les doublons automatiquement
+
+      for (let regex of regexPatterns) {
+        let match;
+        while ((match = regex.exec(html)) !== null) {
+          // Décodage des caractères spéciaux comme dans le python replace('\\u002f', '/')
+          let cleanUrl = match[1].replace(/\\u002f/g, '/').replace(/&amp;/g, '&');
+          
+          // Filtrage pour ne garder que les vraies images
+          if (cleanUrl.match(/\.(jpg|jpeg|png|webp)/i)) {
+            foundUrls.add(cleanUrl);
+          }
+          
+          // On s'arrête à 10 images
+          if (foundUrls.size >= 10) break;
+        }
+        if (foundUrls.size >= 10) break;
       }
 
-      if (data.items && data.items.length > 0) {
-        setWebImages(data.items.map(item => item.link));
-        showToast("10 images trouvées !");
+      const imagesArray = Array.from(foundUrls);
+
+      if (imagesArray.length > 0) {
+        setWebImages(imagesArray);
+        showToast(`${imagesArray.length} images trouvées sur le Web !`);
       } else {
         showToast("Aucune image trouvée pour cette recherche.");
       }
     } catch (error) {
-      console.error("Erreur Google Images:", error);
-      showToast(error.message || "Erreur de connexion à Google Images.");
+      console.error("Erreur Web Scraping Bing:", error);
+      showToast(error.message || "Erreur de connexion au moteur de recherche.");
     } finally {
       setIsSearchingImages(false);
     }
@@ -306,7 +287,6 @@ export default function BackOfficeApp() {
     }
 
     try {
-      // 1. Insérer dans le catalogue officiel (table 'articles')
       const newArticle = {
         code_barre: selectedArticle.code_barre,
         designation: formData.designation,
@@ -315,7 +295,7 @@ export default function BackOfficeApp() {
         groupe: formData.groupe,
         famille: formData.famille,
         type: formData.type,
-        // NOUVEAU : Si une image web a été cliquée, on l'utilise. Sinon on garde la photo scannée.
+        // Si une image web est sélectionnée, on l'utilise
         photo_url: selectedWebImage || selectedArticle.photo_url,
         statut: 'Actif',
         site_rattachement: selectedArticle.magasin
@@ -324,7 +304,6 @@ export default function BackOfficeApp() {
       const { error: insertError } = await supabase.from('articles').insert([newArticle]);
       if (insertError) throw insertError;
 
-      // 2. Supprimer de la file d'attente (table 'articles_a_creer')
       const { error: deleteError } = await supabase
         .from('articles_a_creer')
         .delete()
@@ -337,7 +316,7 @@ export default function BackOfficeApp() {
       fetchPendingArticles();
 
     } catch (e) {
-      console.error("Erreur lors de l'enregistrement :", e);
+      console.error("Erreur d'enregistrement:", e);
       showToast("Erreur lors de la sauvegarde : " + e.message);
     }
   };
@@ -347,11 +326,7 @@ export default function BackOfficeApp() {
     if (!window.confirm("Voulez-vous vraiment rejeter cette demande ? Elle sera supprimée définitivement.")) return;
 
     try {
-      const { error } = await supabase
-        .from('articles_a_creer')
-        .delete()
-        .eq('id', selectedArticle.id);
-        
+      const { error } = await supabase.from('articles_a_creer').delete().eq('id', selectedArticle.id);
       if (error) throw error;
 
       showToast("Demande supprimée.");
@@ -364,7 +339,6 @@ export default function BackOfficeApp() {
 
   // --- VUES ---
 
-  // VUE 1 : AVERTISSEMENT CONFIGURATION
   if (!supabase) {
     return (
       <>
@@ -382,7 +356,6 @@ export default function BackOfficeApp() {
     );
   }
 
-  // VUE 2 : ÉCRAN DE CONNEXION (Style TechScan Sombre)
   if (!session) {
     return (
       <>
@@ -427,20 +400,17 @@ export default function BackOfficeApp() {
     );
   }
 
-  // VUE 3 : LE DASHBOARD BACK-OFFICE FULL-SCREEN
   return (
     <>
       <GlobalCssReset />
       <div className="flex flex-col h-screen w-full bg-slate-100 font-sans text-slate-800 overflow-hidden">
         
-        {/* Notifications Toasts */}
         {toastMessage && (
           <div className="absolute top-20 right-8 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 font-bold text-sm flex items-center gap-3 animate-in slide-in-from-right">
              <CheckCircle size={20} className="text-emerald-400"/> {toastMessage}
           </div>
         )}
 
-        {/* TOP NAVBAR */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-20 shadow-sm w-full">
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-emerald-600 rounded-lg flex items-center justify-center shadow-sm">
@@ -469,10 +439,7 @@ export default function BackOfficeApp() {
           </div>
         </header>
 
-        {/* CORPS DU DASHBOARD */}
         <div className="flex-1 flex overflow-hidden w-full">
-          
-          {/* Colonne de gauche : File d'attente (Largeur fixe) */}
           <aside className="w-80 lg:w-[350px] bg-white border-r border-slate-200 flex flex-col z-10 shrink-0 shadow-sm h-full">
             <div className="p-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
                <div>
@@ -524,7 +491,6 @@ export default function BackOfficeApp() {
             </div>
           </aside>
 
-          {/* Zone Principale : Espace de travail Fluide */}
           <main className="flex-1 relative overflow-y-auto p-6 lg:p-8 w-full h-full">
              {!selectedArticle ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400">
@@ -537,7 +503,6 @@ export default function BackOfficeApp() {
              ) : (
                 <div className="w-full h-full flex flex-col xl:flex-row gap-6 xl:gap-8 animate-in fade-in zoom-in-95 duration-300">
                    
-                   {/* COLONNE PHOTO & IA */}
                    <div className="w-full xl:w-5/12 flex flex-col gap-4 h-full">
                       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[55%] relative">
                          <div className="flex justify-between items-center mb-4 shrink-0">
@@ -549,12 +514,10 @@ export default function BackOfficeApp() {
                            </span>
                          </div>
 
-                         {/* Affichage intelligent : Soit l'image Web cliquée, soit la photo scannée */}
                          <div className={`bg-slate-900 rounded-xl overflow-hidden flex-1 flex items-center justify-center relative shadow-inner w-full min-h-0 ${selectedWebImage ? 'ring-4 ring-emerald-500/50' : ''}`}>
                             <img src={selectedWebImage || selectedArticle.photo_url} alt="Pièce" className="max-w-full max-h-full object-contain" />
                          </div>
                          
-                         {/* Si une image web est sélectionnée, on garde un aperçu de la photo scannée en bas */}
                          {selectedWebImage && (
                             <div className="absolute bottom-8 left-8 bg-white p-1 rounded-lg shadow-xl flex items-center gap-2 border border-slate-200 animate-in fade-in zoom-in">
                                 <img src={selectedArticle.photo_url} className="w-12 h-12 object-cover rounded bg-slate-100" title="Photo originale scannée" />
@@ -601,7 +564,6 @@ export default function BackOfficeApp() {
                       </div>
                    </div>
 
-                   {/* COLONNE FORMULAIRE DE VALIDATION */}
                    <div className="w-full xl:w-7/12 flex flex-col h-full">
                       <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-lg border border-slate-200 flex-1 flex flex-col h-full overflow-y-auto">
                          <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-5 shrink-0">
@@ -615,7 +577,6 @@ export default function BackOfficeApp() {
                          </div>
                          
                          <div className="space-y-6 flex-1">
-                            {/* SECTION INFO PRINCIPALES */}
                             <div className="space-y-5">
                               <div>
                                  <label className="text-slate-700 text-xs font-extrabold mb-2 flex items-center gap-1 uppercase tracking-wider">
@@ -654,7 +615,6 @@ export default function BackOfficeApp() {
 
                             <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent my-2"></div>
 
-                            {/* SECTION CLASSIFICATION */}
                             <div>
                               <h4 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2 uppercase tracking-widest"><Layers size={16}/> Classification</h4>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -673,20 +633,20 @@ export default function BackOfficeApp() {
                               </div>
                             </div>
                             
-                            {/* NOUVEAU : SECTION RECHERCHE IMAGES WEB */}
+                            {/* RECHERCHE IMAGES WEB VIA SCRAPING BING */}
                             <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mt-4">
                               <div className="flex items-center justify-between mb-3">
                                   <div>
                                     <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-widest"><Globe size={16} className="text-blue-500"/> Photo Web</h4>
-                                    <p className="text-xs text-slate-500 mt-0.5">Remplacer la photo du technicien par une image officielle.</p>
+                                    <p className="text-xs text-slate-500 mt-0.5">Trouver une image officielle (Moteur Bing).</p>
                                   </div>
                                   <button
-                                      onClick={searchGoogleImages}
+                                      onClick={searchWebImages}
                                       disabled={isSearchingImages || !formData.designation}
                                       className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                       {isSearchingImages ? <RefreshCw size={14} className="animate-spin text-blue-500" /> : <Search size={14} className="text-blue-500" />}
-                                      Chercher sur Google
+                                      Chercher sur le Web
                                   </button>
                               </div>
 
@@ -708,7 +668,6 @@ export default function BackOfficeApp() {
 
                          </div>
 
-                         {/* ACTIONS FINALES */}
                          <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-4 shrink-0">
                             <button 
                                onClick={handleRejectArticle}
