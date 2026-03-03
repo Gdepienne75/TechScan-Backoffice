@@ -8,6 +8,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
+
 // --- CONFIGURATION API IA (Gemini) ---
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -168,9 +169,8 @@ export default function BackOfficeApp() {
         "type": "Type précis (ex: Disjoncteur, Perceuse, Cheville)"
       }`;
 
-      // 3. Appel à l'API Google Gemini 1.5 Flash
-      // Correction de l'URL de l'API (ajout de /v1beta/models/...)
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      // 3. Appel à l'API Google Gemini (Basé sur la documentation officielle)
+      const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
       
       const requestBody = {
           contents: [{
@@ -191,7 +191,10 @@ export default function BackOfficeApp() {
 
       const response = await fetch(apiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+              'Content-Type': 'application/json',
+              'x-goog-api-key': GEMINI_API_KEY
+          },
           body: JSON.stringify(requestBody)
       });
 
