@@ -12,6 +12,11 @@ const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supaba
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 
+// --- CONFIGURATION GOOGLE CUSTOM SEARCH API ---
+// ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
+const GOOGLE_SEARCH_API_KEY = import.meta.env.VITE_GOOGLE_SEARCH_API_KEY || '';
+const GOOGLE_SEARCH_CX = import.meta.env.VITE_GOOGLE_SEARCH_CX || '';
+
 // Composant pour écraser les marges par défaut de Vite/StackBlitz
 const GlobalCssReset = () => (
   <style dangerouslySetInnerHTML={{__html: `
@@ -19,112 +24,6 @@ const GlobalCssReset = () => (
     body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #f8fafc; }
   `}} />
 );
-
-// ==========================================
-// 🕷️ MOTEUR DE SCRAPING D'IMAGES MULTI-PROXY
-// ==========================================
-
-// Fonction ultra-résiliente pour contourner le blocage CORS et les pare-feux stricts
-const fetchHTML = async (targetUrl) => {
-    const encodedUrl = encodeURIComponent(targetUrl);
-    
-    // On utilise 3 stratégies de proxy différentes pour maximiser les chances de passer le pare-feu
-    const proxyStrategies = [
-        // Stratégie 1: AllOrigins (API JSON, souvent autorisée par les pare-feux)
-        async () => {
-            const res = await fetch(`https://api.allorigins.win/get?url=${encodedUrl}`);
-            if (!res.ok) throw new Error("AllOrigins failed");
-            const data = await res.json();
-            return data.contents;
-        },
-        // Stratégie 2: CodeTabs (Raw HTML proxy)
-        async () => {
-            const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodedUrl}`);
-            if (!res.ok) throw new Error("CodeTabs failed");
-            return await res.text();
-        },
-        // Stratégie 3: ThingProxy (Raw HTML proxy alternatif)
-        async () => {
-            const res = await fetch(`https://thingproxy.freeboard.io/fetch/${targetUrl}`);
-            if (!res.ok) throw new Error("ThingProxy failed");
-            return await res.text();
-        }
-    ];
-
-    for (let strategy of proxyStrategies) {
-        try {
-            const html = await strategy();
-            if (html && html.length > 1000) return html; // Si on a un vrai code HTML, on arrête de chercher
-        } catch (e) {
-            console.warn("Un proxy a été bloqué, passage au suivant...");
-        }
-    }
-    throw new Error("Le pare-feu du réseau bloque toutes les requêtes de recherche.");
-};
-
-// Fonction commune pour extraire les images avec tes Regex (Adapté de ton Python)
-const extractImagesWithRegex = (html, regexes) => {
-    const results = new Set();
-    regexes.forEach(regex => {
-        let match;
-        while ((match = regex.exec(html)) !== null) {
-            // Décodage des caractères (équivalent de python replace)
-            let imgUrl = match[1].replace(/\\u003d/g, '=').replace(/\\u0026/g, '&').replace(/\\u002f/g, '/').replace(/&amp;/g, '&');
-            
-            // Filtrage : Doit être une image, on évite les logos et les trackers
-            if (imgUrl.match(/\.(jpg|jpeg|png|webp)/i) && !imgUrl.includes('gstatic.com') && !imgUrl.includes('google.com/logos')) {
-                results.add(imgUrl);
-            }
-            if (results.size >= 15) break; 
-        }
-    });
-    return Array.from(results).slice(0, 10); // On garde les 10 meilleures images
-};
-
-// Moteur 1 : Google Images
-const scrapeGoogleImages = async (query) => {
-    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=isch&ijn=0`;
-    const html = await fetchHTML(url);
-    return extractImagesWithRegex(html, [
-        /\["(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))",\d+,\d+\]/gi,
-        /"ou":"(https?:\/\/[^"]+?)"/gi,
-        /data-src="(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))"/gi
-    ]);
-};
-
-// Moteur 2 : DuckDuckGo (Logique avec jeton VQD)
-const scrapeDuckDuckGoImages = async (query) => {
-    // Étape 1 : Récupérer le jeton de sécurité obligatoire
-    const baseHtml = await fetchHTML(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&iar=images&iax=images&ia=images`);
-    const vqdMatch = baseHtml.match(/vqd=['"](.*?)['"]/);
-    if (!vqdMatch) throw new Error("Jeton DDG introuvable");
-    
-    // Étape 2 : Interroger l'API interne
-    const apiUrl = `https://duckduckgo.com/i.js?l=fr-fr&o=json&q=${encodeURIComponent(query)}&vqd=${vqdMatch[1]}&f=,,,&p=1`;
-    const apiHtml = await fetchHTML(apiUrl);
-    const parsed = JSON.parse(apiHtml);
-    
-    const results = [];
-    if (parsed.results) {
-        for (let r of parsed.results) {
-            if (r.image && r.image.match(/\.(jpg|jpeg|png|webp)/i)) results.push(r.image);
-            if (results.length >= 10) break;
-        }
-    }
-    return results;
-};
-
-// Moteur 3 : Bing Images
-const scrapeBingImages = async (query) => {
-    const url = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&first=1&count=15&qft=+filterui:photo-photo`;
-    const html = await fetchHTML(url);
-    return extractImagesWithRegex(html, [
-        /murl&quot;:&quot;(https?:\/\/[^&"]+?)&quot;/gi,
-        /"murl":"(https?:\/\/[^"]+?)"/gi,
-        /src="(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))"/gi
-    ]);
-};
-
 
 export default function BackOfficeApp() {
   const [session, setSession] = useState(null);
@@ -144,7 +43,10 @@ export default function BackOfficeApp() {
   const [webImages, setWebImages] = useState([]);
   const [isSearchingImages, setIsSearchingImages] = useState(false);
   const [selectedWebImage, setSelectedWebImage] = useState(null);
+  
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
+  // NOUVEAU : État pour le choix du moteur de recherche d'images
+  const [searchEngine, setSearchEngine] = useState('google');
 
   const [formData, setFormData] = useState({
     designation: '', marque: '', reference_fabricant: '', groupe: '', famille: '', type: ''
@@ -201,6 +103,7 @@ export default function BackOfficeApp() {
     setFormData({ designation: '', marque: '', reference_fabricant: '', groupe: '', famille: '', type: '' });
   };
 
+  // --- 🤖 IA GEMINI ---
   const runAIAnalysis = async () => {
     if (!selectedArticle) return;
     setIsProcessingAI(true);
@@ -258,7 +161,69 @@ export default function BackOfficeApp() {
     }
   };
 
-  // 🌐 EXÉCUTION DU MOTEUR DE RECHERCHE EN CASCADE
+  // --- 🌐 RECHERCHE D'IMAGES WEB (MOTEURS MULTIPLES) ---
+  const fetchWithProxy = async (targetUrl) => {
+    // Liste de proxys gratuits pour contourner le CORS
+    const proxies = [
+      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
+    ];
+
+    for (let proxy of proxies) {
+      try {
+        const response = await fetch(proxy);
+        if (response.ok) {
+          return await response.text();
+        }
+      } catch (e) {
+        console.warn(`Proxy échoué: ${proxy}`);
+      }
+    }
+    throw new Error("Les serveurs Proxy sont temporairement indisponibles ou bloqués.");
+  };
+
+  const scrapeDuckDuckGoImages = async (query) => {
+    try {
+      // 1. On cherche d'abord la page HTML pour récupérer le jeton VQD obligatoire
+      const htmlUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&iar=images&iax=images&ia=images`;
+      const htmlText = await fetchWithProxy(htmlUrl);
+      
+      const vqdMatch = htmlText.match(/vqd=["']([^"']+)["']/);
+      if (!vqdMatch) throw new Error("Jeton VQD introuvable. DuckDuckGo bloque la requête.");
+      const vqd = vqdMatch[1];
+
+      // 2. On appelle l'API interne avec le jeton
+      const apiUrl = `https://duckduckgo.com/i.js?l=fr-fr&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`;
+      const jsonText = await fetchWithProxy(apiUrl);
+      const data = JSON.parse(jsonText);
+
+      if (data.results && data.results.length > 0) {
+        // Filtrer pour ne garder que des images valides
+        const validImages = data.results.filter(r => r.image && r.image.match(/\.(jpg|jpeg|png|webp)/i)).map(r => r.image);
+        return validImages.slice(0, 10);
+      }
+      return [];
+    } catch (error) {
+      console.error("Erreur DuckDuckGo:", error);
+      throw error;
+    }
+  };
+
+  const callGoogleImagesAPI = async (query) => {
+    if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_CX) {
+      throw new Error("Clés API Google manquantes sur Vercel.");
+    }
+    const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&cx=${GOOGLE_SEARCH_CX}&searchType=image&key=${GOOGLE_SEARCH_API_KEY}&num=10`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || "Erreur de l'API Google.");
+    
+    if (data.items && data.items.length > 0) {
+      return data.items.map(item => item.link);
+    }
+    return [];
+  };
+
   const searchWebImages = async () => {
     if (!formData.designation) {
       showToast("Veuillez remplir la désignation avant de chercher.");
@@ -270,50 +235,31 @@ export default function BackOfficeApp() {
     setSelectedWebImage(null);
 
     try {
-        // On construit la requête (ex: "Schneider Disjoncteur 16A")
         const query = `${formData.marque !== 'Inconnue' ? formData.marque : ''} ${formData.designation}`.trim();
         let images = [];
-        let source = "";
 
-        // TENTATIVE 1 : GOOGLE IMAGES
-        try {
-            console.log("Recherche via Google...");
-            images = await scrapeGoogleImages(query);
-            if (images.length > 0) source = "Google Images";
-        } catch (e) { console.warn("Échec Google:", e.message); }
-
-        // TENTATIVE 2 : DUCKDUCKGO (Si Google a échoué)
-        if (images.length === 0) {
-            try {
-                console.log("Recherche via DuckDuckGo...");
-                images = await scrapeDuckDuckGoImages(query);
-                if (images.length > 0) source = "DuckDuckGo";
-            } catch (e) { console.warn("Échec DuckDuckGo:", e.message); }
-        }
-
-        // TENTATIVE 3 : BING IMAGES (Si tout le reste a échoué)
-        if (images.length === 0) {
-            try {
-                console.log("Recherche via Bing...");
-                images = await scrapeBingImages(query);
-                if (images.length > 0) source = "Bing Images";
-            } catch (e) { console.warn("Échec Bing:", e.message); }
+        if (searchEngine === 'google') {
+           images = await callGoogleImagesAPI(query);
+        } else if (searchEngine === 'duckduckgo') {
+           images = await scrapeDuckDuckGoImages(query);
         }
 
         if (images.length > 0) {
             setWebImages(images);
-            showToast(`${images.length} images trouvées via ${source} !`);
+            showToast(`${images.length} images trouvées avec ${searchEngine === 'google' ? 'Google' : 'DuckDuckGo'} !`);
         } else {
-            showToast("Aucun résultat. Le pare-feu bloque peut-être les requêtes réseau.");
+            showToast("Aucun résultat trouvé pour cette recherche.");
         }
 
     } catch (error) {
-        showToast("Erreur lors de la recherche Web.");
+        console.error(`Erreur recherche ${searchEngine}:`, error);
+        showToast(error.message || "Erreur lors de la recherche d'images.");
     } finally {
         setIsSearchingImages(false);
     }
   };
 
+  // --- VALIDATION FINALE ---
   const handleSaveToCatalog = async () => {
     if (!supabase || !selectedArticle) return;
     if (!formData.designation || !formData.marque) { showToast("Désignation et marque requises."); return; }
@@ -350,6 +296,8 @@ export default function BackOfficeApp() {
       fetchPendingArticles();
     } catch(e) { showToast("Erreur lors de la suppression."); }
   };
+
+  // --- VUES ---
 
   if (!supabase) {
     return (
@@ -477,6 +425,7 @@ export default function BackOfficeApp() {
              ) : (
                 <div className="w-full h-full flex flex-col xl:flex-row gap-6 xl:gap-8 animate-in fade-in zoom-in-95 duration-300">
                    
+                   {/* COLONNE GAUCHE : IMAGE & IA */}
                    <div className="w-full xl:w-5/12 flex flex-col gap-4 h-full">
                       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[55%] relative">
                          <div className="flex justify-between items-center mb-4 shrink-0">
@@ -508,7 +457,7 @@ export default function BackOfficeApp() {
                              
                              <div className="w-full mb-4">
                                  <label className="block text-[10px] font-bold text-indigo-800 uppercase tracking-wider mb-1.5 flex items-center gap-1"><Cpu size={12}/> Modèle IA (Moteur)</label>
-                                 <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full p-2.5 text-sm font-medium rounded-xl border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-400 shadow-sm" disabled={isProcessingAI}>
+                                 <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full p-2.5 text-sm font-medium rounded-xl border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-400 shadow-sm cursor-pointer" disabled={isProcessingAI}>
                                     <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rapide)</option>
                                     <option value="gemini-2.5-pro">Gemini 2.5 Pro (Puissant)</option>
                                  </select>
@@ -521,6 +470,7 @@ export default function BackOfficeApp() {
                       </div>
                    </div>
 
+                   {/* COLONNE DROITE : FORMULAIRE */}
                    <div className="w-full xl:w-7/12 flex flex-col h-full">
                       <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-lg border border-slate-200 flex-1 flex flex-col h-full overflow-y-auto">
                          <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-5 shrink-0">
@@ -567,21 +517,32 @@ export default function BackOfficeApp() {
                               </div>
                             </div>
                             
-                            {/* RECHERCHE IMAGES WEB (Multi-Moteurs + Multi-Proxys) */}
+                            {/* RECHERCHE IMAGES WEB (CHOIX DU MOTEUR) */}
                             <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mt-4">
-                              <div className="flex items-center justify-between mb-3">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
                                   <div>
                                     <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-widest"><Globe size={16} className="text-blue-500"/> Photo Web</h4>
-                                    <p className="text-xs text-slate-500 mt-0.5">Scraping: Google {'>'} DuckDuckGo {'>'} Bing</p>
+                                    <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">Remplacez la photo par une image officielle.</p>
                                   </div>
-                                  <button
-                                      onClick={searchWebImages}
-                                      disabled={isSearchingImages || !formData.designation}
-                                      className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-                                  >
-                                      {isSearchingImages ? <RefreshCw size={14} className="animate-spin text-blue-500" /> : <Search size={14} className="text-blue-500" />}
-                                      Chercher sur le Web
-                                  </button>
+                                  
+                                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                                      <select 
+                                          value={searchEngine} 
+                                          onChange={(e) => setSearchEngine(e.target.value)}
+                                          className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-2 py-2 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none cursor-pointer"
+                                      >
+                                          <option value="google">Google API</option>
+                                          <option value="duckduckgo">DuckDuckGo</option>
+                                      </select>
+                                      <button
+                                          onClick={searchWebImages}
+                                          disabled={isSearchingImages || !formData.designation}
+                                          className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 whitespace-nowrap"
+                                      >
+                                          {isSearchingImages ? <RefreshCw size={14} className="animate-spin text-blue-500" /> : <Search size={14} className="text-blue-500" />}
+                                          Chercher
+                                      </button>
+                                  </div>
                               </div>
 
                               {webImages.length > 0 && (
