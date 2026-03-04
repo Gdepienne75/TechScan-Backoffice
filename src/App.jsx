@@ -24,48 +24,64 @@ const GlobalCssReset = () => (
 // 🕷️ MOTEUR DE SCRAPING D'IMAGES MULTI-PROXY
 // ==========================================
 
-// Fonction pour contourner le blocage CORS des navigateurs via 3 proxys gratuits
+// Fonction ultra-résiliente pour contourner le blocage CORS et les pare-feux stricts
 const fetchHTML = async (targetUrl) => {
     const encodedUrl = encodeURIComponent(targetUrl);
-    const proxies = [
-        `https://corsproxy.io/?${encodedUrl}`,
-        `https://api.allorigins.win/raw?url=${encodedUrl}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodedUrl}`
+    
+    // On utilise 3 stratégies de proxy différentes pour maximiser les chances de passer le pare-feu
+    const proxyStrategies = [
+        // Stratégie 1: AllOrigins (API JSON, souvent autorisée par les pare-feux)
+        async () => {
+            const res = await fetch(`https://api.allorigins.win/get?url=${encodedUrl}`);
+            if (!res.ok) throw new Error("AllOrigins failed");
+            const data = await res.json();
+            return data.contents;
+        },
+        // Stratégie 2: CodeTabs (Raw HTML proxy)
+        async () => {
+            const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodedUrl}`);
+            if (!res.ok) throw new Error("CodeTabs failed");
+            return await res.text();
+        },
+        // Stratégie 3: ThingProxy (Raw HTML proxy alternatif)
+        async () => {
+            const res = await fetch(`https://thingproxy.freeboard.io/fetch/${targetUrl}`);
+            if (!res.ok) throw new Error("ThingProxy failed");
+            return await res.text();
+        }
     ];
 
-    for (let proxy of proxies) {
+    for (let strategy of proxyStrategies) {
         try {
-            const response = await fetch(proxy);
-            if (response.ok) {
-                const text = await response.text();
-                if (text && text.length > 500) return text;
-            }
+            const html = await strategy();
+            if (html && html.length > 1000) return html; // Si on a un vrai code HTML, on arrête de chercher
         } catch (e) {
-            console.warn(`Proxy échoué: ${proxy}`);
+            console.warn("Un proxy a été bloqué, passage au suivant...");
         }
     }
-    throw new Error("Tous les proxys de contournement ont échoué.");
+    throw new Error("Le pare-feu du réseau bloque toutes les requêtes de recherche.");
 };
 
-// Fonction commune pour extraire les images avec tes Regex Python
+// Fonction commune pour extraire les images avec tes Regex (Adapté de ton Python)
 const extractImagesWithRegex = (html, regexes) => {
     const results = new Set();
     regexes.forEach(regex => {
         let match;
         while ((match = regex.exec(html)) !== null) {
-            // Décodage des caractères comme dans Python
+            // Décodage des caractères (équivalent de python replace)
             let imgUrl = match[1].replace(/\\u003d/g, '=').replace(/\\u0026/g, '&').replace(/\\u002f/g, '/').replace(/&amp;/g, '&');
             
-            // Filtrage : Doit être une image et on évite les logos internes Google
+            // Filtrage : Doit être une image, on évite les logos et les trackers
             if (imgUrl.match(/\.(jpg|jpeg|png|webp)/i) && !imgUrl.includes('gstatic.com') && !imgUrl.includes('google.com/logos')) {
                 results.add(imgUrl);
             }
             if (results.size >= 15) break; 
         }
     });
-    return Array.from(results).slice(0, 10); // On garde les 10 meilleures
+    return Array.from(results).slice(0, 10); // On garde les 10 meilleures images
 };
 
+// Moteur 1 : Google Images
 const scrapeGoogleImages = async (query) => {
     const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=isch&ijn=0`;
     const html = await fetchHTML(url);
@@ -76,15 +92,15 @@ const scrapeGoogleImages = async (query) => {
     ]);
 };
 
+// Moteur 2 : DuckDuckGo (Logique avec jeton VQD)
 const scrapeDuckDuckGoImages = async (query) => {
-    // Étape 1 : Récupérer le jeton VQD obligatoire de DDG
+    // Étape 1 : Récupérer le jeton de sécurité obligatoire
     const baseHtml = await fetchHTML(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&iar=images&iax=images&ia=images`);
     const vqdMatch = baseHtml.match(/vqd=['"](.*?)['"]/);
-    if (!vqdMatch) throw new Error("Jeton VQD DuckDuckGo introuvable");
-    const vqd = vqdMatch[1];
+    if (!vqdMatch) throw new Error("Jeton DDG introuvable");
     
-    // Étape 2 : Appeler l'API interne avec le jeton
-    const apiUrl = `https://duckduckgo.com/i.js?l=fr-fr&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`;
+    // Étape 2 : Interroger l'API interne
+    const apiUrl = `https://duckduckgo.com/i.js?l=fr-fr&o=json&q=${encodeURIComponent(query)}&vqd=${vqdMatch[1]}&f=,,,&p=1`;
     const apiHtml = await fetchHTML(apiUrl);
     const parsed = JSON.parse(apiHtml);
     
@@ -98,6 +114,7 @@ const scrapeDuckDuckGoImages = async (query) => {
     return results;
 };
 
+// Moteur 3 : Bing Images
 const scrapeBingImages = async (query) => {
     const url = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&first=1&count=15&qft=+filterui:photo-photo`;
     const html = await fetchHTML(url);
@@ -253,40 +270,41 @@ export default function BackOfficeApp() {
     setSelectedWebImage(null);
 
     try {
+        // On construit la requête (ex: "Schneider Disjoncteur 16A")
         const query = `${formData.marque !== 'Inconnue' ? formData.marque : ''} ${formData.designation}`.trim();
         let images = [];
         let source = "";
 
-        // 1. Tentative sur Google Images
+        // TENTATIVE 1 : GOOGLE IMAGES
         try {
-            console.log("Tentative Google...");
+            console.log("Recherche via Google...");
             images = await scrapeGoogleImages(query);
-            if (images.length > 0) source = "Google";
-        } catch (e) { console.warn("Google échoué", e); }
+            if (images.length > 0) source = "Google Images";
+        } catch (e) { console.warn("Échec Google:", e.message); }
 
-        // 2. Tentative sur DuckDuckGo (Si Google a échoué)
+        // TENTATIVE 2 : DUCKDUCKGO (Si Google a échoué)
         if (images.length === 0) {
             try {
-                console.log("Tentative DuckDuckGo...");
+                console.log("Recherche via DuckDuckGo...");
                 images = await scrapeDuckDuckGoImages(query);
                 if (images.length > 0) source = "DuckDuckGo";
-            } catch (e) { console.warn("DuckDuckGo échoué", e); }
+            } catch (e) { console.warn("Échec DuckDuckGo:", e.message); }
         }
 
-        // 3. Tentative sur Bing (Si DDG a échoué)
+        // TENTATIVE 3 : BING IMAGES (Si tout le reste a échoué)
         if (images.length === 0) {
             try {
-                console.log("Tentative Bing...");
+                console.log("Recherche via Bing...");
                 images = await scrapeBingImages(query);
-                if (images.length > 0) source = "Bing";
-            } catch (e) { console.warn("Bing échoué", e); }
+                if (images.length > 0) source = "Bing Images";
+            } catch (e) { console.warn("Échec Bing:", e.message); }
         }
 
         if (images.length > 0) {
             setWebImages(images);
             showToast(`${images.length} images trouvées via ${source} !`);
         } else {
-            showToast("Aucun résultat. Les proxies sont peut-être temporairement bloqués.");
+            showToast("Aucun résultat. Le pare-feu bloque peut-être les requêtes réseau.");
         }
 
     } catch (error) {
