@@ -8,6 +8,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
+
 // --- CONFIGURATION API IA (Gemini) ---
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -158,20 +159,31 @@ export default function BackOfficeApp() {
         code_barre: selectedArticle.code_barre, designation: formData.designation, marque: formData.marque,
         reference_fabricant: formData.reference_fabricant, groupe: formData.groupe, famille: formData.famille, type: formData.type,
         photo_url: selectedArticle.photo_url, // On sauvegarde uniquement la photo originale prise par la tablette
-        statut: 'Actif', site_rattachement: selectedArticle.magasin
+        statut: 'Actif', site_rattachement: selectedArticle.magasin || 'Non défini'
       };
 
+      // 1. Essayer d'insérer dans la table 'articles'
       const { error: insertError } = await supabase.from('articles').insert([newArticle]);
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error("Erreur Insertion:", insertError);
+        throw new Error(`Insertion: ${insertError.message}`);
+      }
 
+      // 2. Essayer de supprimer de la file d'attente
       const { error: deleteError } = await supabase.from('articles_a_creer').delete().eq('id', selectedArticle.id);
-      if (deleteError) throw deleteError;
+      if (deleteError) {
+        console.error("Erreur Suppression:", deleteError);
+        throw new Error(`Suppression file d'attente: ${deleteError.message}`);
+      }
 
       setStats(prev => ({ ...prev, totalProcessed: prev.totalProcessed + 1 }));
       showToast(`L'article a été ajouté au catalogue !`);
       setSelectedArticle(null);
       fetchPendingArticles();
-    } catch (e) { showToast("Erreur lors de la sauvegarde."); }
+    } catch (e) { 
+      console.error("Détail complet du plantage:", e);
+      showToast(`Erreur: ${e.message}`); 
+    }
   };
 
   const handleRejectArticle = async () => {
@@ -180,11 +192,17 @@ export default function BackOfficeApp() {
 
     try {
       const { error } = await supabase.from('articles_a_creer').delete().eq('id', selectedArticle.id);
-      if (error) throw error;
+      if (error) {
+        console.error("Erreur Rejet:", error);
+        throw new Error(error.message);
+      }
       showToast("Demande supprimée.");
       setSelectedArticle(null);
       fetchPendingArticles();
-    } catch(e) { showToast("Erreur lors de la suppression."); }
+    } catch(e) { 
+      console.error("Détail complet du plantage:", e);
+      showToast(`Erreur: ${e.message}`); 
+    }
   };
 
   // --- VUES ---
@@ -421,3 +439,4 @@ export default function BackOfficeApp() {
       </div>
     </>
   );
+}
