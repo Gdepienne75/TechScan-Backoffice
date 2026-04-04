@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, Database, ChevronRight, User, LogOut, Lock, Eye, EyeOff, Save, Layers, Hash, Calendar, ArrowRight, MapPin, Cpu, Globe, Image as ImageIcon } from 'lucide-react';
+import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, Database, ChevronRight, User, LogOut, Lock, Eye, EyeOff, Save, Layers, Hash, Calendar, ArrowRight, MapPin, Cpu, Image as ImageIcon } from 'lucide-react';
 
 // --- CONFIGURATION SUPABASE ---
 // ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
@@ -11,11 +11,6 @@ const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supaba
 // --- CONFIGURATION API IA (Gemini) ---
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-
-// --- CONFIGURATION GOOGLE CUSTOM SEARCH API ---
-// ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
-const GOOGLE_SEARCH_API_KEY = import.meta.env.VITE_GOOGLE_SEARCH_API_KEY || '';
-const GOOGLE_SEARCH_CX = import.meta.env.VITE_GOOGLE_SEARCH_CX || '';
 
 // Composant pour écraser les marges par défaut de Vite/StackBlitz
 const GlobalCssReset = () => (
@@ -40,13 +35,7 @@ export default function BackOfficeApp() {
   const [toastMessage, setToastMessage] = useState(null);
   const [stats, setStats] = useState({ totalProcessed: 0 });
   
-  const [webImages, setWebImages] = useState([]);
-  const [isSearchingImages, setIsSearchingImages] = useState(false);
-  const [selectedWebImage, setSelectedWebImage] = useState(null);
-  
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
-  // NOUVEAU : État pour le choix du moteur de recherche d'images
-  const [searchEngine, setSearchEngine] = useState('google');
 
   const [formData, setFormData] = useState({
     designation: '', marque: '', reference_fabricant: '', groupe: '', famille: '', type: ''
@@ -98,8 +87,6 @@ export default function BackOfficeApp() {
 
   const handleSelectArticle = (article) => {
     setSelectedArticle(article);
-    setWebImages([]);
-    setSelectedWebImage(null);
     setFormData({ designation: '', marque: '', reference_fabricant: '', groupe: '', famille: '', type: '' });
   };
 
@@ -161,104 +148,6 @@ export default function BackOfficeApp() {
     }
   };
 
-  // --- 🌐 RECHERCHE D'IMAGES WEB (MOTEURS MULTIPLES) ---
-  const fetchWithProxy = async (targetUrl) => {
-    // Liste de proxys gratuits pour contourner le CORS
-    const proxies = [
-      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
-    ];
-
-    for (let proxy of proxies) {
-      try {
-        const response = await fetch(proxy);
-        if (response.ok) {
-          return await response.text();
-        }
-      } catch (e) {
-        console.warn(`Proxy échoué: ${proxy}`);
-      }
-    }
-    throw new Error("Les serveurs Proxy sont temporairement indisponibles ou bloqués.");
-  };
-
-  const scrapeDuckDuckGoImages = async (query) => {
-    try {
-      // 1. On cherche d'abord la page HTML pour récupérer le jeton VQD obligatoire
-      const htmlUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&iar=images&iax=images&ia=images`;
-      const htmlText = await fetchWithProxy(htmlUrl);
-      
-      const vqdMatch = htmlText.match(/vqd=["']([^"']+)["']/);
-      if (!vqdMatch) throw new Error("Jeton VQD introuvable. DuckDuckGo bloque la requête.");
-      const vqd = vqdMatch[1];
-
-      // 2. On appelle l'API interne avec le jeton
-      const apiUrl = `https://duckduckgo.com/i.js?l=fr-fr&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`;
-      const jsonText = await fetchWithProxy(apiUrl);
-      const data = JSON.parse(jsonText);
-
-      if (data.results && data.results.length > 0) {
-        // Filtrer pour ne garder que des images valides
-        const validImages = data.results.filter(r => r.image && r.image.match(/\.(jpg|jpeg|png|webp)/i)).map(r => r.image);
-        return validImages.slice(0, 10);
-      }
-      return [];
-    } catch (error) {
-      console.error("Erreur DuckDuckGo:", error);
-      throw error;
-    }
-  };
-
-  const callGoogleImagesAPI = async (query) => {
-    if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_CX) {
-      throw new Error("Clés API Google manquantes sur Vercel.");
-    }
-    const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&cx=${GOOGLE_SEARCH_CX}&searchType=image&key=${GOOGLE_SEARCH_API_KEY}&num=10`;
-    const response = await fetch(url);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || "Erreur de l'API Google.");
-    
-    if (data.items && data.items.length > 0) {
-      return data.items.map(item => item.link);
-    }
-    return [];
-  };
-
-  const searchWebImages = async () => {
-    if (!formData.designation) {
-      showToast("Veuillez remplir la désignation avant de chercher.");
-      return;
-    }
-
-    setIsSearchingImages(true);
-    setWebImages([]);
-    setSelectedWebImage(null);
-
-    try {
-        const query = `${formData.marque !== 'Inconnue' ? formData.marque : ''} ${formData.designation}`.trim();
-        let images = [];
-
-        if (searchEngine === 'google') {
-           images = await callGoogleImagesAPI(query);
-        } else if (searchEngine === 'duckduckgo') {
-           images = await scrapeDuckDuckGoImages(query);
-        }
-
-        if (images.length > 0) {
-            setWebImages(images);
-            showToast(`${images.length} images trouvées avec ${searchEngine === 'google' ? 'Google' : 'DuckDuckGo'} !`);
-        } else {
-            showToast("Aucun résultat trouvé pour cette recherche.");
-        }
-
-    } catch (error) {
-        console.error(`Erreur recherche ${searchEngine}:`, error);
-        showToast(error.message || "Erreur lors de la recherche d'images.");
-    } finally {
-        setIsSearchingImages(false);
-    }
-  };
-
   // --- VALIDATION FINALE ---
   const handleSaveToCatalog = async () => {
     if (!supabase || !selectedArticle) return;
@@ -268,7 +157,8 @@ export default function BackOfficeApp() {
       const newArticle = {
         code_barre: selectedArticle.code_barre, designation: formData.designation, marque: formData.marque,
         reference_fabricant: formData.reference_fabricant, groupe: formData.groupe, famille: formData.famille, type: formData.type,
-        photo_url: selectedWebImage || selectedArticle.photo_url, statut: 'Actif', site_rattachement: selectedArticle.magasin
+        photo_url: selectedArticle.photo_url, // On sauvegarde uniquement la photo originale prise par la tablette
+        statut: 'Actif', site_rattachement: selectedArticle.magasin
       };
 
       const { error: insertError } = await supabase.from('articles').insert([newArticle]);
@@ -430,21 +320,14 @@ export default function BackOfficeApp() {
                       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[55%] relative">
                          <div className="flex justify-between items-center mb-4 shrink-0">
                            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                              {selectedWebImage ? <><Globe size={16} className="text-emerald-500"/> Image retenue</> : <><ImageIcon size={16}/> Image scannée</>}
+                              <ImageIcon size={16}/> Image scannée
                            </h3>
                            <span className="text-slate-700 font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200 flex items-center gap-2"><Hash size={14} className="text-slate-400"/> {selectedArticle.code_barre}</span>
                          </div>
 
-                         <div className={`bg-slate-900 rounded-xl overflow-hidden flex-1 flex items-center justify-center relative shadow-inner w-full min-h-0 ${selectedWebImage ? 'ring-4 ring-emerald-500/50' : ''}`}>
-                            <img src={selectedWebImage || selectedArticle.photo_url} className="max-w-full max-h-full object-contain" />
+                         <div className="bg-slate-900 rounded-xl overflow-hidden flex-1 flex items-center justify-center relative shadow-inner w-full min-h-0">
+                            <img src={selectedArticle.photo_url} className="max-w-full max-h-full object-contain" />
                          </div>
-                         
-                         {selectedWebImage && (
-                            <div className="absolute bottom-8 left-8 bg-white p-1 rounded-lg shadow-xl flex items-center gap-2 border border-slate-200 animate-in fade-in zoom-in">
-                                <img src={selectedArticle.photo_url} className="w-12 h-12 object-cover rounded bg-slate-100" />
-                                <div className="text-[10px] font-bold text-slate-500 leading-tight pr-2">Photo<br/>Originale</div>
-                            </div>
-                         )}
                       </div>
 
                       <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-2xl border border-indigo-100 shadow-inner flex flex-col items-center justify-center h-[45%]">
@@ -516,50 +399,6 @@ export default function BackOfficeApp() {
                                  </div>
                               </div>
                             </div>
-                            
-                            {/* RECHERCHE IMAGES WEB (CHOIX DU MOTEUR) */}
-                            <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mt-4">
-                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
-                                  <div>
-                                    <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-widest"><Globe size={16} className="text-blue-500"/> Photo Web</h4>
-                                    <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">Remplacez la photo par une image officielle.</p>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                                      <select 
-                                          value={searchEngine} 
-                                          onChange={(e) => setSearchEngine(e.target.value)}
-                                          className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-2 py-2 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none cursor-pointer"
-                                      >
-                                          <option value="google">Google API</option>
-                                          <option value="duckduckgo">DuckDuckGo</option>
-                                      </select>
-                                      <button
-                                          onClick={searchWebImages}
-                                          disabled={isSearchingImages || !formData.designation}
-                                          className="text-xs font-bold bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 whitespace-nowrap"
-                                      >
-                                          {isSearchingImages ? <RefreshCw size={14} className="animate-spin text-blue-500" /> : <Search size={14} className="text-blue-500" />}
-                                          Chercher
-                                      </button>
-                                  </div>
-                              </div>
-
-                              {webImages.length > 0 && (
-                                  <div className="grid grid-cols-5 gap-3 mt-4 animate-in slide-in-from-top-2">
-                                      {webImages.map((imgUrl, idx) => (
-                                          <div 
-                                              key={idx} onClick={() => setSelectedWebImage(imgUrl)}
-                                              className={`aspect-square rounded-xl bg-white overflow-hidden border-2 cursor-pointer transition-all hover:opacity-90 ${selectedWebImage === imgUrl ? 'border-emerald-500 shadow-md ring-2 ring-emerald-500/30 scale-105' : 'border-transparent shadow-sm'}`}
-                                              title="Cliquer pour utiliser cette image"
-                                          >
-                                              <img src={imgUrl} alt="Web suggestion" className="w-full h-full object-cover" />
-                                          </div>
-                                      ))}
-                                  </div>
-                              )}
-                            </div>
-
                          </div>
 
                          <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-4 shrink-0">
