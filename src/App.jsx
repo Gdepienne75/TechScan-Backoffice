@@ -8,7 +8,6 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
-
 // --- CONFIGURATION API IA (Gemini) ---
 // ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -156,10 +155,16 @@ export default function BackOfficeApp() {
 
     try {
       const newArticle = {
-        code_barre: selectedArticle.code_barre, designation: formData.designation, marque: formData.marque,
-        reference_fabricant: formData.reference_fabricant, groupe: formData.groupe, famille: formData.famille, type: formData.type,
-        photo_url: selectedArticle.photo_url, // On sauvegarde uniquement la photo originale prise par la tablette
-        statut: 'Actif', site_rattachement: selectedArticle.magasin || 'Non défini'
+        code_barre: selectedArticle.code_barre, 
+        designation: formData.designation, 
+        marque: formData.marque,
+        reference_fabricant: formData.reference_fabricant, 
+        groupe: formData.groupe, 
+        famille: formData.famille, 
+        type: formData.type,
+        photo: selectedArticle.photo_url, // CORRECTION : 'photo' au lieu de 'photo_url'
+        statut: 'Actif', 
+        site_rattachement: selectedArticle.magasin || 'Non défini'
       };
 
       // 1. Essayer d'insérer dans la table 'articles'
