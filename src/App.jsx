@@ -12,7 +12,6 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 // 📋 RÉFÉRENTIEL DU MAGASIN (Formaté pour une lecture directe)
 // ==========================================
 const REFERENTIEL = {
-  {
     "CONSOMMABLES": {
       "Consommables": [
         "Abrasifs",
@@ -340,7 +339,6 @@ const REFERENTIEL = {
         "Chaussure"
       ]
     }
-  }
 };
 
 // Composant pour écraser les marges par défaut
