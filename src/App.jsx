@@ -1,16 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, Database, ChevronRight, User, LogOut, Lock, Eye, EyeOff, Save, Layers, Hash, Calendar, ArrowRight, MapPin, Cpu, Image as ImageIcon } from 'lucide-react';
 
-// --- CONFIGURATION SUPABASE ---
-// ⚠️ DÉCOMMENTEZ CES LIGNES POUR VOTRE PROJET STACKBLITZ / VERCEL
 import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-// --- CONFIGURATION API IA (Gemini) ---
-// ⚠️ DÉCOMMENTEZ CETTE LIGNE POUR VOTRE PROJET STACKBLITZ / VERCEL
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+// ==========================================
+// 📋 RÉFÉRENTIEL DU MAGASIN (Extrait)
+// Remplacez ce texte par le contenu complet de votre fichier CSV
+// ==========================================
+const REFERENTIEL_CSV = `,Groupe,Famille,Type
+,CONSOMMABLES,Consommables,Abrasifs
+,CONSOMMABLES,Consommables,Adhesifs
+,CONSOMMABLES,Consommables,Agrafes
+,CONSOMMABLES,Consommables,Cable metallique
+,CONSOMMABLES,Consommables,Ciments et reboucheurs
+,CONSOMMABLES,Consommables,Colles
+,CONSOMMABLES,Consommables,Colorants
+,CONSOMMABLES,Consommables,Crayons, marqueurs et temoins
+,CONSOMMABLES,Consommables,Deggripants
+,CONSOMMABLES,Consommables,Drisses
+,CONSOMMABLES,Consommables,Films et polyanes
+,CONSOMMABLES,Consommables,Graisses et lubrifiants
+,CONSOMMABLES,Consommables,Joints, isolant et etancheite
+,CONSOMMABLES,Consommables,Mousses
+,CONSOMMABLES,Consommables,Peintures
+,CONSOMMABLES,Consommables,Enduits
+,CONSOMMABLES,Consommables,Produits d'entretien
+,CONSOMMABLES,Consommables,Soudure
+,CONSOMMABLES,Consommables,Disques
+,CONSOMMABLES,Consommables,Forets
+,CONSOMMABLES,Consommables,Gourdes
+,CONSOMMABLES,Consommables,Sel de déneigement
+,CONSOMMABLES,Consommables,Sel de régenration
+,CONSOMMABLES,Consommables,Cadenas de consignation
+,PLOMBERIE,Tube à souder,tube à souder
+,EQUIPEMENT MEDICAL,Chariot douche,Accessoires
+,EQUIPEMENT MEDICAL,Lève malade,Accessoires
+,EQUIPEMENT MEDICAL,Fauteuil roulant,Accessoires
+,EQUIPEMENT MEDICAL,Table d'examen,Accessoires
+,EQUIPEMENT MEDICAL,Berceaux,Accessoires
+,EQUIPEMENT MEDICAL,Brancard,Accessoires
+,EQUIPEMENT MEDICAL,eclairage opératoire,Accessoires
+,EQUIPEMENT HOTELIER,chariot et borne repas,Accessoires
+,EQUIPEMENT HOTELIER,table de nuit,Accessoires
+,EQUIPEMENT HOTELIER,Lave vaisselle,Accessoires
+,EQUIPEMENT HOTELIER,Lave bassin,Accessoires
+,EQUIPEMENT HOTELIER,Fontane à eau,Accessoires
+,EQUIPEMENT HOTELIER,Machine à glaçon,Accessoires
+,EQUIPEMENT HOTELIER,Machine à café,Accessoires
+,AGENCEMENT,MACONNERIE,ragréage
+,AGENCEMENT,MACONNERIE,carrelage
+,AGENCEMENT,MACONNERIE,platre
+,AGENCEMENT,MACONNERIE,Carreaux de platre
+,AGENCEMENT,MACONNERIE,plaque platre
+,AGENCEMENT,MACONNERIE,rails plaque de platre
+,AGENCEMENT,ameublement,tablettes bois
+,AGENCEMENT,menuiserie,plaque bois et pvc
+,SIGNALETIQUE,Signalétique,film et bache
+,SIGNALETIQUE,Signalétique,tonner
+,EQUIPEMENT DE PROTECTION,EPC,Barrière
+,EQUIPEMENT DE PROTECTION,EPC,Plots`;
 
 // Composant pour écraser les marges par défaut de Vite/StackBlitz
 const GlobalCssReset = () => (
@@ -40,6 +93,34 @@ export default function BackOfficeApp() {
   const [formData, setFormData] = useState({
     designation: '', marque: '', reference_fabricant: '', groupe: '', famille: '', type: ''
   });
+
+  // --- PARSEUR DU RÉFÉRENTIEL CSV ---
+  const referentiel = useMemo(() => {
+    const lines = REFERENTIEL_CSV.split('\n').filter(l => l.trim().length > 0);
+    const hierarchy = {};
+    
+    // On ignore la première ligne (les en-têtes)
+    for (let i = 1; i < lines.length; i++) {
+      // Sépare par virgule et retire les cellules vides (gère la virgule initiale de ton CSV)
+      const cols = lines[i].split(/[,;\t]/).map(c => c.trim().replace(/^"|"$/g, '')).filter(c => c !== '');
+      
+      if (cols.length >= 3) {
+        // Prendre les 3 dernières colonnes non-vides
+        const type = cols.pop();
+        const famille = cols.pop();
+        const groupe = cols.pop();
+
+        if (groupe && famille && type) {
+          if (!hierarchy[groupe]) hierarchy[groupe] = {};
+          if (!hierarchy[groupe][famille]) hierarchy[groupe][famille] = [];
+          if (!hierarchy[groupe][famille].includes(type)) {
+            hierarchy[groupe][famille].push(type);
+          }
+        }
+      }
+    }
+    return hierarchy;
+  }, []);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -90,7 +171,7 @@ export default function BackOfficeApp() {
     setFormData({ designation: '', marque: '', reference_fabricant: '', groupe: '', famille: '', type: '' });
   };
 
-  // --- 🤖 IA GEMINI ---
+  // --- 🤖 IA GEMINI (Bridée avec le référentiel) ---
   const runAIAnalysis = async () => {
     if (!selectedArticle) return;
     setIsProcessingAI(true);
@@ -106,24 +187,33 @@ export default function BackOfficeApp() {
           reader.readAsDataURL(imageBlob);
       });
 
-      const promptText = `Tu es un expert magasinier technique (bricolage, électricité, plomberie, quincaillerie, mécanique, etc.).
+      // LE NOUVEAU PROMPT : On force l'IA à utiliser le CSV
+      const promptText = `Tu es un expert magasinier technique de l'APHP.
       Analyse l'image fournie et le code-barre scanné suivant : ${selectedArticle.code_barre}.
       Identifie cet article et déduis un maximum d'informations visibles.
-      IMPORTANT: Renvoyer un objet JSON valide, sans aucun texte ou formatage markdown (pas de \`\`\`json) autour.
+      
+      🚨 RÈGLE ABSOLUE POUR LA CLASSIFICATION 🚨
+      Tu dois OBLIGATOIREMENT choisir la combinaison "groupe", "famille" et "type" la plus pertinente PARMI CETTE LISTE EXACTE :
+      ${REFERENTIEL_CSV}
+      
+      Ne les invente pas. Recopie la majuscule et l'orthographe exactes de la liste.
+      Si rien ne correspond, laisse des chaînes vides "".
+
+      IMPORTANT: Renvoyer UNIQUEMENT un objet JSON valide, sans formatage markdown (pas de \`\`\`json).
       Structure exacte :
       {
         "designation": "Nom complet détaillé",
         "marque": "Nom du fabricant ou 'Inconnue'",
-        "reference_fabricant": "Référence ou 'N/A'",
-        "groupe": "Électricité, Outillage, Plomberie, Quincaillerie, Mécanique, Consommable",
-        "famille": "Sous-catégorie cohérente",
-        "type": "Type précis"
+        "reference_fabricant": "Référence lue sur la photo ou 'N/A'",
+        "groupe": "Choix depuis la liste",
+        "famille": "Choix depuis la liste",
+        "type": "Choix depuis la liste"
       }`;
 
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`;
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${GEMINI_API_KEY}`;
       const response = await fetch(apiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
               contents: [{ parts: [{ text: promptText }, { inlineData: { mimeType: imageBlob.type || "image/jpeg", data: base64Image } }] }],
               generationConfig: { responseMimeType: "application/json" }
@@ -135,9 +225,18 @@ export default function BackOfficeApp() {
       const cleanJsonText = result.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
       const aiData = JSON.parse(cleanJsonText);
 
+      // Validation de la réponse IA contre le référentiel pour la sécurité
+      let finalGroupe = referentiel[aiData.groupe] ? aiData.groupe : '';
+      let finalFamille = (finalGroupe && referentiel[finalGroupe][aiData.famille]) ? aiData.famille : '';
+      let finalType = (finalFamille && referentiel[finalGroupe][finalFamille].includes(aiData.type)) ? aiData.type : '';
+
       setFormData({
-        designation: aiData.designation || '', marque: aiData.marque || '', reference_fabricant: aiData.reference_fabricant || '',
-        groupe: aiData.groupe || '', famille: aiData.famille || '', type: aiData.type || ''
+        designation: aiData.designation || '', 
+        marque: aiData.marque || '', 
+        reference_fabricant: aiData.reference_fabricant || '',
+        groupe: finalGroupe, 
+        famille: finalFamille, 
+        type: finalType
       });
 
       showToast(`Analyse réussie avec ${selectedModel} !`);
@@ -152,6 +251,7 @@ export default function BackOfficeApp() {
   const handleSaveToCatalog = async () => {
     if (!supabase || !selectedArticle) return;
     if (!formData.designation || !formData.marque) { showToast("Désignation et marque requises."); return; }
+    if (!formData.groupe || !formData.famille || !formData.type) { showToast("Veuillez sélectionner un Groupe, une Famille et un Type."); return; }
 
     try {
       const newArticle = {
@@ -167,39 +267,20 @@ export default function BackOfficeApp() {
         site_rattachement: selectedArticle.magasin || 'Non défini'
       };
 
-      // 1. Essayer d'insérer dans la table 'articles'
       const { error: insertError } = await supabase.from('articles').insert([newArticle]);
-      if (insertError) {
-        console.error("Erreur Insertion:", insertError);
-        throw new Error(`Insertion: ${insertError.message}`);
-      }
+      if (insertError) throw new Error(`Insertion: ${insertError.message}`);
 
-      // 2. Essayer de supprimer de la file d'attente
       const { error: deleteError } = await supabase.from('articles_a_creer').delete().eq('id', selectedArticle.id);
-      if (deleteError) {
-        console.error("Erreur Suppression:", deleteError);
-        throw new Error(`Suppression file d'attente: ${deleteError.message}`);
-      }
+      if (deleteError) throw new Error(`Suppression: ${deleteError.message}`);
 
-      // 3. NOUVEAU : Mettre à jour l'historique sur les tablettes pour cet article
-      const { error: historyError } = await supabase
-        .from('historique_scans')
-        .update({ 
-            details: newArticle, // Remplace les détails provisoires par les infos validées
-            trouve: true         // L'article est maintenant officiellement "trouvé"
-        })
-        .eq('code_barre', selectedArticle.code_barre);
-
-      if (historyError) {
-        console.warn("Mise à jour de l'historique échouée (non bloquant):", historyError);
-      }
+      await supabase.from('historique_scans').update({ details: newArticle, trouve: true }).eq('code_barre', selectedArticle.code_barre);
 
       setStats(prev => ({ ...prev, totalProcessed: prev.totalProcessed + 1 }));
       showToast(`L'article a été ajouté au catalogue !`);
       setSelectedArticle(null);
       fetchPendingArticles();
     } catch (e) { 
-      console.error("Détail complet du plantage:", e);
+      console.error(e);
       showToast(`Erreur: ${e.message}`); 
     }
   };
@@ -210,32 +291,16 @@ export default function BackOfficeApp() {
 
     try {
       const { error } = await supabase.from('articles_a_creer').delete().eq('id', selectedArticle.id);
-      if (error) {
-        console.error("Erreur Rejet:", error);
-        throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
 
-      // NOUVEAU : Mettre à jour l'historique pour dire que l'article a été refusé
-      await supabase
-        .from('historique_scans')
-        .update({ 
-            details: {
-              code_barre: selectedArticle.code_barre,
-              designation: 'Article rejeté',
-              marque: 'Demande annulée',
-              photo: selectedArticle.photo_url,
-              statut: 'Rejeté'
-            }
-        })
-        .eq('code_barre', selectedArticle.code_barre);
+      await supabase.from('historique_scans').update({ 
+            details: { designation: 'Article rejeté', marque: 'Annulé', statut: 'Rejeté' }
+      }).eq('code_barre', selectedArticle.code_barre);
 
       showToast("Demande supprimée.");
       setSelectedArticle(null);
       fetchPendingArticles();
-    } catch(e) { 
-      console.error("Détail complet du plantage:", e);
-      showToast(`Erreur: ${e.message}`); 
-    }
+    } catch(e) { showToast(`Erreur: ${e.message}`); }
   };
 
   // --- VUES ---
@@ -248,7 +313,15 @@ export default function BackOfficeApp() {
           <div className="bg-white p-10 rounded-2xl max-w-lg w-full text-center border border-slate-200 shadow-2xl">
             <Database size={72} className="mx-auto text-emerald-500 mb-6" />
             <h1 className="text-3xl font-black mb-4">Base de données requise</h1>
-            <p className="text-slate-500 text-lg">Veuillez configurer <strong>VITE_SUPABASE_URL</strong> et <strong>VITE_SUPABASE_ANON_KEY</strong> sur Vercel.</p>
+            <p className="text-slate-500 text-lg mb-6">L'environnement de prévisualisation ne peut pas se connecter à votre base de données.</p>
+            <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-left text-sm">
+                <strong>Pour utiliser ce code sur Vercel ou StackBlitz :</strong>
+                <ul className="list-disc pl-5 mt-2 space-y-1">
+                    <li>Décommentez les imports <code>@supabase/supabase-js</code> en haut du fichier.</li>
+                    <li>Décommentez les déclarations contenant <code>import.meta.env</code>.</li>
+                    <li>Supprimez les constantes "mock" ajoutées pour la prévisualisation.</li>
+                </ul>
+            </div>
           </div>
         </div>
       </>
@@ -294,6 +367,11 @@ export default function BackOfficeApp() {
       </>
     );
   }
+
+  // Listes dynamiques pour les dropdowns basées sur le référentiel
+  const availableGroups = Object.keys(referentiel).sort();
+  const availableFamilies = formData.groupe ? Object.keys(referentiel[formData.groupe] || {}).sort() : [];
+  const availableTypes = (formData.groupe && formData.famille) ? (referentiel[formData.groupe][formData.famille] || []).sort() : [];
 
   return (
     <>
@@ -433,21 +511,52 @@ export default function BackOfficeApp() {
 
                             <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent my-2"></div>
 
+                            {/* SECTION SÉLECTEURS DE RÉFÉRENTIEL */}
                             <div>
-                              <h4 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2 uppercase tracking-widest"><Layers size={16}/> Classification</h4>
+                              <h4 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2 uppercase tracking-widest"><Layers size={16}/> Classification (Référentiel)</h4>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                 
+                                 {/* SÉLECTEUR GROUPE */}
                                  <div>
-                                    <label className="text-slate-600 text-xs font-bold mb-1.5 block">Groupe</label>
-                                    <input type="text" value={formData.groupe} onChange={(e) => setFormData({...formData, groupe: e.target.value})} className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-lg py-2.5 px-3 focus:bg-white" />
+                                    <label className="text-slate-600 text-xs font-bold mb-1.5 block">Groupe <span className="text-red-500">*</span></label>
+                                    <select 
+                                      value={formData.groupe} 
+                                      onChange={(e) => setFormData({...formData, groupe: e.target.value, famille: '', type: ''})} 
+                                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-lg py-2.5 px-3 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
+                                    >
+                                      <option value="">Sélectionner...</option>
+                                      {availableGroups.map(g => <option key={g} value={g}>{g}</option>)}
+                                    </select>
                                  </div>
+
+                                 {/* SÉLECTEUR FAMILLE (Dépendant du groupe) */}
                                  <div>
-                                    <label className="text-slate-600 text-xs font-bold mb-1.5 block">Famille</label>
-                                    <input type="text" value={formData.famille} onChange={(e) => setFormData({...formData, famille: e.target.value})} className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-lg py-2.5 px-3 focus:bg-white" />
+                                    <label className="text-slate-600 text-xs font-bold mb-1.5 block">Famille <span className="text-red-500">*</span></label>
+                                    <select 
+                                      value={formData.famille} 
+                                      onChange={(e) => setFormData({...formData, famille: e.target.value, type: ''})} 
+                                      disabled={!formData.groupe}
+                                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-lg py-2.5 px-3 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      <option value="">Sélectionner...</option>
+                                      {availableFamilies.map(f => <option key={f} value={f}>{f}</option>)}
+                                    </select>
                                  </div>
+
+                                 {/* SÉLECTEUR TYPE (Dépendant de la famille) */}
                                  <div>
-                                    <label className="text-slate-600 text-xs font-bold mb-1.5 block">Type</label>
-                                    <input type="text" value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})} className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-lg py-2.5 px-3 focus:bg-white" />
+                                    <label className="text-slate-600 text-xs font-bold mb-1.5 block">Type <span className="text-red-500">*</span></label>
+                                    <select 
+                                      value={formData.type} 
+                                      onChange={(e) => setFormData({...formData, type: e.target.value})} 
+                                      disabled={!formData.famille}
+                                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-lg py-2.5 px-3 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      <option value="">Sélectionner...</option>
+                                      {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
                                  </div>
+
                               </div>
                             </div>
                          </div>
