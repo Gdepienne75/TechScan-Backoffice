@@ -55,19 +55,6 @@ const REFERENTIEL = {
   }
 };
 
-// Version texte du référentiel optimisée pour l'IA Gemini
-const REFERENTIEL_TEXT_FOR_AI = `
-- CONSOMMABLES > Consommables > Abrasifs, Adhesifs, Agrafes, Cable metallique, Ciments et reboucheurs, Colles, Colorants, Crayons, marqueurs et temoins, Deggripants, Drisses, Films et polyanes, Graisses et lubrifiants, Joints, isolant et etancheite, Mousses, Peintures, Enduits, Produits d'entretien, Soudure, Disques, Forets, Gourdes, Sel de déneigement, Sel de régenration, Cadenas de consignation
-- PLOMBERIE > Tube à souder > tube à souder
-- EQUIPEMENT MEDICAL > Chariot douche, Lève malade, Fauteuil roulant, Table d'examen, Berceaux, Brancard, eclairage opératoire > Accessoires
-- EQUIPEMENT HOTELIER > chariot et borne repas, table de nuit, Lave vaisselle, Lave bassin, Fontane à eau, Machine à glaçon, Machine à café > Accessoires
-- AGENCEMENT > MACONNERIE > ragréage, carrelage, platre, Carreaux de platre, plaque platre, rails plaque de platre
-- AGENCEMENT > ameublement > tablettes bois
-- AGENCEMENT > menuiserie > plaque bois et pvc
-- SIGNALETIQUE > Signalétique > film et bache, tonner
-- EQUIPEMENT DE PROTECTION > EPC > Barrière, Plots
-`;
-
 // Composant pour écraser les marges par défaut
 const GlobalCssReset = () => (
   <style dangerouslySetInnerHTML={{__html: `
@@ -167,10 +154,10 @@ export default function BackOfficeApp() {
       Identifie cet article et déduis un maximum d'informations visibles.
       
       REGLE ABSOLUE POUR LA CLASSIFICATION :
-      Tu dois OBLIGATOIREMENT choisir la combinaison "groupe", "famille" et "type" la plus pertinente PARMI CETTE LISTE EXACTE :
-      ${REFERENTIEL_TEXT_FOR_AI}
+      Tu dois OBLIGATOIREMENT choisir la combinaison "groupe", "famille" et "type" la plus pertinente PARMI CET ARBRE DE CLASSIFICATION EXACT (JSON) :
+      ${JSON.stringify(REFERENTIEL, null, 2)}
       
-      Ne les invente pas. Recopie la majuscule et l'orthographe exactes de la liste.
+      Ne les invente pas. Recopie la majuscule et l'orthographe exactes de l'arbre ci-dessus.
       Si rien ne correspond parfaitement, laisse des chaines vides "".
 
       IMPORTANT: Renvoyer UNIQUEMENT un objet JSON valide, sans formatage markdown ni balises de code.
@@ -179,9 +166,9 @@ export default function BackOfficeApp() {
         "designation": "Nom complet détaillé",
         "marque": "Nom du fabricant ou 'Inconnue'",
         "reference_fabricant": "Référence lue sur la photo ou 'N/A'",
-        "groupe": "Choix depuis la liste",
-        "famille": "Choix depuis la liste",
-        "type": "Choix depuis la liste"
+        "groupe": "Choix depuis l'arbre",
+        "famille": "Choix depuis l'arbre (doit appartenir au groupe)",
+        "type": "Choix depuis l'arbre (doit appartenir à la famille)"
       }`;
 
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${GEMINI_API_KEY}`;
@@ -199,10 +186,12 @@ export default function BackOfficeApp() {
       const cleanJsonText = result.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
       const aiData = JSON.parse(cleanJsonText);
 
-      // Validation de la réponse IA contre le référentiel JavaScript
-      let finalGroupe = REFERENTIEL[aiData.groupe] ? aiData.groupe : '';
-      let finalFamille = (finalGroupe && REFERENTIEL[finalGroupe][aiData.famille]) ? aiData.famille : '';
-      let finalType = (finalFamille && REFERENTIEL[finalGroupe][finalFamille].includes(aiData.type)) ? aiData.type : '';
+      // Validation TOLÉRANTE de la réponse IA (ignore la casse et les espaces superflus)
+      const cleanStr = (s) => (s || '').toString().trim().toLowerCase();
+      
+      const finalGroupe = Object.keys(REFERENTIEL).find(g => cleanStr(g) === cleanStr(aiData.groupe)) || '';
+      const finalFamille = finalGroupe ? (Object.keys(REFERENTIEL[finalGroupe]).find(f => cleanStr(f) === cleanStr(aiData.famille)) || '') : '';
+      const finalType = finalFamille ? (REFERENTIEL[finalGroupe][finalFamille].find(t => cleanStr(t) === cleanStr(aiData.type)) || '') : '';
 
       setFormData({
         designation: aiData.designation || '', 
