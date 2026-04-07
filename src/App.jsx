@@ -2,16 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Package, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, Wand2, Database, ChevronRight, User, LogOut, Lock, Eye, EyeOff, Save, Layers, Hash, Calendar, ArrowRight, MapPin, Cpu, Image as ImageIcon } from 'lucide-react';
 
 // ==========================================
-// ⚠️ INSTRUCTIONS DE DÉPLOIEMENT (VERCELS / STACKBLITZ)
+// ⚠️ INSTRUCTIONS DE DÉPLOIEMENT (VERCEL / STACKBLITZ)
 // Décommentez les lignes ci-dessous dans votre véritable projet
 // ==========================================
 
-import { createClient } from '@supabase/supabase-js';
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+// import { createClient } from '@supabase/supabase-js';
+// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+// const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// const supabase = createClient(supabaseUrl, supabaseKey);
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+// const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+// --- VARIABLES POUR LA PRÉVISUALISATION (À SUPPRIMER EN PRODUCTION) ---
+const supabase = null;
+const GEMINI_API_KEY = '';
+// ----------------------------------------------------------------------
 
 // ==========================================
 // 📋 RÉFÉRENTIEL DU MAGASIN (Extrait)
